@@ -1,4 +1,4 @@
-const EIA_URL = "https://api.eia.gov/v2/petroleum/pri/gnd/data/";
+const EIA_BASE = "https://api.eia.gov/v2/petroleum/pri/gnd/data/";
 const GALLONS_PER_LITRE = 3.785411784;
 
 export type EiaUsPrices = {
@@ -11,25 +11,25 @@ export type EiaUsPrices = {
 async function fetchSeries(productCode: string): Promise<{ value: number; period: string } | null> {
   const apiKey = process.env.EIA_API_KEY;
   if (!apiKey) return null;
-  const url = new URL(EIA_URL);
-  url.searchParams.set("api_key", apiKey);
-  url.searchParams.set("frequency", "weekly");
-  url.searchParams.append("data[0]", "value");
-  url.searchParams.append("facets[product][]", productCode);
-  url.searchParams.append("facets[duoarea][]", "NUS");
-  url.searchParams.append("sort[0][column]", "period");
-  url.searchParams.append("sort[0][direction]", "desc");
-  url.searchParams.set("offset", "0");
-  url.searchParams.set("length", "1");
+  const url =
+    `${EIA_BASE}?api_key=${encodeURIComponent(apiKey)}` +
+    `&frequency=weekly` +
+    `&data[0]=value` +
+    `&facets[product][]=${productCode}` +
+    `&facets[duoarea][]=NUS` +
+    `&sort[0][column]=period&sort[0][direction]=desc` +
+    `&offset=0&length=1`;
   try {
-    const res = await fetch(url.toString(), { next: { revalidate: 604800 } });
+    const res = await fetch(url, { next: { revalidate: 604800 } });
     if (!res.ok) return null;
     const data = (await res.json()) as {
-      response?: { data?: Array<{ value: number; period: string }> };
+      response?: { data?: Array<{ value: number | string; period: string }> };
     };
     const row = data.response?.data?.[0];
-    if (!row || !Number.isFinite(row.value)) return null;
-    return { value: row.value, period: row.period };
+    if (!row) return null;
+    const num = typeof row.value === "string" ? parseFloat(row.value) : row.value;
+    if (!Number.isFinite(num)) return null;
+    return { value: num, period: row.period };
   } catch {
     return null;
   }
