@@ -5,7 +5,7 @@ import AddressInput from "@/components/AddressInput";
 import VehiclePicker from "@/components/VehiclePicker";
 import RouteMap from "@/components/RouteMap";
 import ResultCard from "@/components/ResultCard";
-import type { CostBreakdown, PriceInfo, RouteResult, Stop, Vehicle } from "@/lib/types";
+import type { CostBreakdown, FuelType, PriceInfo, RouteResult, Stop, Vehicle } from "@/lib/types";
 import { computeCost, fuelEmoji, formatNumber } from "@/lib/calc";
 import { unitPriceFor } from "@/lib/prices";
 
@@ -18,6 +18,25 @@ function makeStop(): Stop {
 export default function Page() {
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [consumptionOverride, setConsumptionOverride] = useState<string>("");
+  const [customMode, setCustomMode] = useState(false);
+  const [customName, setCustomName] = useState("");
+  const [customFuel, setCustomFuel] = useState<FuelType>("petrol");
+  const [customConsumption, setCustomConsumption] = useState("");
+
+  const customVehicle: Vehicle | null = useMemo(() => {
+    const c = parseFloat(customConsumption);
+    if (!customMode || Number.isNaN(c) || c <= 0) return null;
+    return {
+      id: "custom",
+      make: "Custom",
+      model: customName.trim() || "Vehicle",
+      yearStart: 0,
+      fuelType: customFuel,
+      consumption: c,
+    };
+  }, [customMode, customName, customFuel, customConsumption]);
+
+  const activeVehicle = customMode ? customVehicle : vehicle;
   const [stops, setStops] = useState<Stop[]>([makeStop(), makeStop()]);
   const [route, setRoute] = useState<RouteResult | null>(null);
   const [prices, setPrices] = useState<PriceInfo | null>(null);
@@ -26,12 +45,13 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
 
   const effectiveConsumption = useMemo(() => {
+    if (customMode) return activeVehicle?.consumption ?? 0;
     const override = parseFloat(consumptionOverride);
     if (!Number.isNaN(override) && override > 0) return override;
-    return vehicle?.consumption ?? 0;
-  }, [consumptionOverride, vehicle?.consumption]);
+    return activeVehicle?.consumption ?? 0;
+  }, [customMode, consumptionOverride, activeVehicle?.consumption]);
 
-  const fuelType = vehicle?.fuelType ?? "petrol";
+  const fuelType = activeVehicle?.fuelType ?? "petrol";
   const placedStops = stops.filter((s) => s.lng !== 0 || s.lat !== 0);
   const firstCountry = placedStops[0]?.countryCode;
 
@@ -53,11 +73,11 @@ export default function Page() {
   }, [firstCountry]);
 
   const cost: CostBreakdown | null = useMemo(() => {
-    if (!route || !prices || !vehicle || effectiveConsumption <= 0) return null;
+    if (!route || !prices || !activeVehicle || effectiveConsumption <= 0) return null;
     const overrideNum = parseFloat(priceOverride);
     const unitPrice = !Number.isNaN(overrideNum) && overrideNum > 0 ? overrideNum : undefined;
     return computeCost(route, { fuelType, consumption: effectiveConsumption }, prices, unitPrice);
-  }, [route, prices, vehicle, effectiveConsumption, fuelType, priceOverride]);
+  }, [route, prices, activeVehicle, effectiveConsumption, fuelType, priceOverride]);
 
   const defaultUnitPrice = prices ? unitPriceFor(prices, fuelType) : 0;
 
@@ -85,8 +105,10 @@ export default function Page() {
       setError("Pick at least an origin and destination.");
       return;
     }
-    if (!vehicle) {
-      setError("Pick a vehicle (or any baseline) to set the fuel type.");
+    if (!activeVehicle) {
+      setError(customMode
+        ? "Set fuel type and consumption for your custom vehicle."
+        : "Pick a vehicle from the list, or switch to Custom.");
       return;
     }
     if (effectiveConsumption <= 0) {
@@ -140,24 +162,90 @@ export default function Page() {
         <section className="lg:col-span-2 space-y-5">
           <Card title="Vehicle" subtitle="What's drinking the fuel?">
             <div className="space-y-3">
-              <VehiclePicker vehicle={vehicle} onChange={(v) => { setVehicle(v); setConsumptionOverride(""); }} />
-              {vehicle && (
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="text-[var(--fg-muted)]">{fuelEmoji(vehicle.fuelType)} {vehicle.fuelType}</span>
-                  <span className="text-[var(--fg-muted)]">•</span>
-                  <label className="text-[var(--fg-muted)]">Consumption</label>
+              <div className="flex gap-1 rounded-lg bg-[var(--surface-2)] p-1 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setCustomMode(false)}
+                  className={`flex-1 px-3 py-1.5 rounded-md transition-colors ${!customMode ? "bg-[var(--surface)] text-[var(--fg)]" : "text-[var(--fg-muted)]"}`}
+                >From list</button>
+                <button
+                  type="button"
+                  onClick={() => setCustomMode(true)}
+                  className={`flex-1 px-3 py-1.5 rounded-md transition-colors ${customMode ? "bg-[var(--surface)] text-[var(--fg)]" : "text-[var(--fg-muted)]"}`}
+                >Custom (anything)</button>
+              </div>
+
+              {!customMode && (
+                <>
+                  <VehiclePicker vehicle={vehicle} onChange={(v) => { setVehicle(v); setConsumptionOverride(""); }} />
+                  {vehicle && (
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="text-[var(--fg-muted)]">{fuelEmoji(vehicle.fuelType)} {vehicle.fuelType}</span>
+                      <span className="text-[var(--fg-muted)]">•</span>
+                      <label className="text-[var(--fg-muted)]">Consumption</label>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        step="0.1"
+                        className="no-spin w-20 rounded-md px-2 py-1 text-sm"
+                        placeholder={String(vehicle.consumption)}
+                        value={consumptionOverride}
+                        onChange={(e) => setConsumptionOverride(e.target.value)}
+                      />
+                      <span className="text-[var(--fg-muted)] text-xs">
+                        {vehicle.fuelType === "electric" ? "kWh/100km" : "L/100km"}
+                      </span>
+                    </div>
+                  )}
+                  {!vehicle && (
+                    <p className="text-xs text-[var(--fg-muted)]">
+                      Can&apos;t find it? Switch to <button type="button" onClick={() => setCustomMode(true)} className="underline hover:text-[var(--fg)]">Custom</button> — works for motorcycles, RVs, anything.
+                    </p>
+                  )}
+                </>
+              )}
+
+              {customMode && (
+                <div className="space-y-2.5">
                   <input
-                    type="number"
-                    inputMode="decimal"
-                    step="0.1"
-                    className="no-spin w-20 rounded-md px-2 py-1 text-sm"
-                    placeholder={String(vehicle.consumption)}
-                    value={consumptionOverride}
-                    onChange={(e) => setConsumptionOverride(e.target.value)}
+                    type="text"
+                    className="w-full rounded-lg px-3 py-2.5 text-sm"
+                    placeholder="Vehicle name (e.g. Ninja 300, Toyota Mocha)"
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
                   />
-                  <span className="text-[var(--fg-muted)] text-xs">
-                    {vehicle.fuelType === "electric" ? "kWh/100km" : "L/100km"}
-                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] uppercase tracking-widest text-[var(--fg-muted)] mb-1">Fuel type</label>
+                      <select
+                        className="w-full rounded-lg px-3 py-2.5 text-sm"
+                        value={customFuel}
+                        onChange={(e) => setCustomFuel(e.target.value as FuelType)}
+                      >
+                        <option value="petrol">Petrol</option>
+                        <option value="diesel">Diesel</option>
+                        <option value="hybrid">Hybrid</option>
+                        <option value="electric">Electric</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase tracking-widest text-[var(--fg-muted)] mb-1">
+                        Consumption ({customFuel === "electric" ? "kWh" : "L"}/100km)
+                      </label>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        step="0.1"
+                        className="no-spin w-full rounded-lg px-3 py-2.5 text-sm"
+                        placeholder={customFuel === "electric" ? "17.5" : customFuel === "diesel" ? "5.0" : "6.0"}
+                        value={customConsumption}
+                        onChange={(e) => setCustomConsumption(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-[var(--fg-muted)]">
+                    {fuelEmoji(customFuel)} Typical: motorbike 3–6 L/100km · small car 5–7 · SUV 8–11 · EV 15–22 kWh/100km
+                  </p>
                 </div>
               )}
             </div>
