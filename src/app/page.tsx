@@ -312,7 +312,7 @@ export default function Page() {
         </section>
 
         <section className="lg:col-span-3 space-y-5">
-          <div className="aspect-[16/9] lg:aspect-auto lg:h-72">
+          <div className="aspect-[900/520]">
             <RouteMap stops={stops} geometry={route?.geometry} mapboxToken={PUBLIC_MAPBOX_TOKEN} />
           </div>
           {cost ? (

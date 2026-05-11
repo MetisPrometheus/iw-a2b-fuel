@@ -51,8 +51,8 @@ export default function RouteMap({ stops, geometry, mapboxToken }: Props) {
   const url = `https://api.mapbox.com/styles/v1/mapbox/light-v11/static/${overlays.join(",")}/auto/900x520@2x?access_token=${mapboxToken}&padding=60`;
 
   return (
-    <div className="surface rounded-xl overflow-hidden h-full min-h-72">
-      <img src={url} alt="Route preview" className="w-full h-full object-cover" />
+    <div className="surface rounded-xl overflow-hidden bg-[var(--surface-2)] flex items-center justify-center h-full min-h-72">
+      <img src={url} alt="Route preview" className="w-full h-full object-contain" />
     </div>
   );
 }
