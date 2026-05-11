@@ -5,7 +5,7 @@ import AddressInput from "@/components/AddressInput";
 import VehiclePicker from "@/components/VehiclePicker";
 import RouteMap from "@/components/RouteMap";
 import ResultCard from "@/components/ResultCard";
-import type { CostBreakdown, PriceInfo, RouteResult, Stop, Vehicle } from "@/lib/types";
+import type { CostBreakdown, FxRates, PriceInfo, RouteResult, Stop, Vehicle } from "@/lib/types";
 import { computeCost, fuelEmoji, formatNumber } from "@/lib/calc";
 import { unitPriceFor } from "@/lib/prices";
 
@@ -22,6 +22,7 @@ export default function Page() {
   const [route, setRoute] = useState<RouteResult | null>(null);
   const [pricesByCountry, setPricesByCountry] = useState<Record<string, PriceInfo>>({});
   const [priceOverrides, setPriceOverrides] = useState<Record<string, string>>({});
+  const [fxRates, setFxRates] = useState<FxRates | null>(null);
   const [calculating, setCalculating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,6 +31,17 @@ export default function Page() {
     if (!Number.isNaN(override) && override > 0) return override;
     return vehicle?.consumption ?? 0;
   }, [consumptionOverride, vehicle?.consumption]);
+
+  useEffect(() => {
+    let cancel = false;
+    fetch("/api/fx")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancel && d?.rates) setFxRates(d);
+      })
+      .catch(() => {});
+    return () => { cancel = true; };
+  }, []);
 
   const fuelType = vehicle?.fuelType ?? "petrol";
   const placedStops = stops.filter((s) => s.lng !== 0 || s.lat !== 0);
@@ -97,6 +109,11 @@ export default function Page() {
   }, [route, vehicle, effectiveConsumption, fuelType, pricesByCountry, overrideMap, allCountries, stopCountries]);
 
   const priceCardCountries = transitCountries.length > 0 ? transitCountries : stopCountries;
+
+  const firstCurrency = stopCountries[0] ? pricesByCountry[stopCountries[0]]?.currency : undefined;
+  const lastCurrency = stopCountries.length > 1
+    ? pricesByCountry[stopCountries[stopCountries.length - 1]]?.currency
+    : undefined;
 
   function addStop() {
     setStops((s) => [...s.slice(0, -1), makeStop(), s[s.length - 1]]);
@@ -316,7 +333,12 @@ export default function Page() {
             <RouteMap stops={stops} geometry={route?.geometry} mapboxToken={PUBLIC_MAPBOX_TOKEN} />
           </div>
           {cost ? (
-            <ResultCard cost={cost} />
+            <ResultCard
+              cost={cost}
+              fxRates={fxRates}
+              firstCurrency={firstCurrency}
+              lastCurrency={lastCurrency}
+            />
           ) : (
             <div className="surface rounded-xl p-5 text-sm text-[var(--fg-muted)]">
               Pick a vehicle, your route, and hit calculate. We&apos;ll estimate using country-average fuel prices — you can override anything.

@@ -62,6 +62,12 @@ export type CurrencyTotal = {
   countries: string[];
 };
 
+export type FxRates = {
+  base: string;
+  rates: Record<string, number>;
+  asOf: string;
+};
+
 export type CostBreakdown = {
   totalDistanceKm: number;
   totalDurationMin: number;
