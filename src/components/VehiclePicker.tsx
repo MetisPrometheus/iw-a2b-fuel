@@ -41,7 +41,7 @@ export default function VehiclePicker({ vehicle, onChange }: Props) {
         autoComplete="off"
       />
       {open && results.length > 0 && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg glass overflow-hidden shadow-2xl max-h-72 overflow-y-auto bg-[var(--surface)]">
+        <div className="absolute z-50 mt-1 w-full rounded-lg dropdown-panel overflow-hidden max-h-72 overflow-y-auto">
           {results.map((v) => (
             <button
               key={v.id}

@@ -104,7 +104,7 @@ export default function AddressInput({ placeholder, value, onChange, proximity }
         )}
       </div>
       {open && (suggestions.length > 0 || loading) && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg glass overflow-hidden shadow-2xl bg-[var(--surface)]">
+        <div className="absolute z-50 mt-1 w-full rounded-lg dropdown-panel overflow-hidden">
           {loading && <div className="px-3 py-2 text-xs text-[var(--fg-muted)]">Searching…</div>}
           {suggestions.map((s) => (
             <button

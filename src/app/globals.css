@@ -3,14 +3,14 @@
 @tailwind utilities;
 
 :root {
-  --bg: #0a0a0b;
-  --surface: #121215;
-  --surface-2: #1a1a1f;
-  --border: #26262d;
-  --fg: #f5f5f7;
-  --fg-muted: #8a8a93;
-  --accent: #7c5cff;
-  --accent-2: #22d3ee;
+  --bg: #1a1d26;
+  --surface: #242833;
+  --surface-2: #2e3340;
+  --border: #3f4554;
+  --fg: #f0f2f5;
+  --fg-muted: #a5abb8;
+  --accent: #8b73ff;
+  --accent-2: #5dd9e8;
 }
 
 html, body { background: var(--bg); color: var(--fg); }
@@ -20,14 +20,16 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-.glass {
-  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+.surface { background: var(--surface); border: 1px solid var(--border); }
+.dropdown-panel {
+  background: var(--surface);
   border: 1px solid var(--border);
+  box-shadow: 0 20px 40px -10px rgba(0,0,0,0.5);
 }
 
 .btn-primary {
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  color: white;
+  color: #0f1218;
 }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -40,7 +42,7 @@ input::placeholder { color: var(--fg-muted); }
 input:focus, select:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.15);
+  box-shadow: 0 0 0 3px rgba(139, 115, 255, 0.18);
 }
 
 .no-spin::-webkit-outer-spin-button,

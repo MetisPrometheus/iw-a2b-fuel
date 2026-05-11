@@ -41,17 +41,32 @@ export type PriceInfo = {
   source: string;
 };
 
+export type LegCost = {
+  legIndex: number;
+  countryCode: string;
+  currency: string;
+  distanceKm: number;
+  durationMin: number;
+  unitsUsed: number;
+  unitPrice: number;
+  cost: number;
+};
+
+export type CurrencyTotal = {
+  currency: string;
+  total: number;
+  distanceKm: number;
+  countries: string[];
+};
+
 export type CostBreakdown = {
   totalDistanceKm: number;
   totalDurationMin: number;
   consumption: number;
   consumptionUnit: "L/100km" | "kWh/100km";
-  unitsUsed: number;
+  totalUnitsUsed: number;
   unitsLabel: "L" | "kWh";
-  unitPrice: number;
-  totalCost: number;
-  currency: string;
-  priceCountry: string;
-  priceSource: string;
+  legs: LegCost[];
+  byCurrency: CurrencyTotal[];
   priceAsOf: string;
 };

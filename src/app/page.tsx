@@ -39,8 +39,8 @@ export default function Page() {
   const activeVehicle = customMode ? customVehicle : vehicle;
   const [stops, setStops] = useState<Stop[]>([makeStop(), makeStop()]);
   const [route, setRoute] = useState<RouteResult | null>(null);
-  const [prices, setPrices] = useState<PriceInfo | null>(null);
-  const [priceOverride, setPriceOverride] = useState<string>("");
+  const [pricesByCountry, setPricesByCountry] = useState<Record<string, PriceInfo>>({});
+  const [priceOverrides, setPriceOverrides] = useState<Record<string, string>>({});
   const [calculating, setCalculating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,33 +53,56 @@ export default function Page() {
 
   const fuelType = activeVehicle?.fuelType ?? "petrol";
   const placedStops = stops.filter((s) => s.lng !== 0 || s.lat !== 0);
-  const firstCountry = placedStops[0]?.countryCode;
+
+  const tripCountries = useMemo(() => {
+    const out: string[] = [];
+    for (const s of placedStops) {
+      if (s.countryCode && !out.includes(s.countryCode)) out.push(s.countryCode);
+    }
+    return out;
+  }, [placedStops.map((s) => s.countryCode).join(",")]);
 
   useEffect(() => {
-    if (!firstCountry) {
-      setPrices(null);
-      return;
-    }
+    if (tripCountries.length === 0) return;
     let cancel = false;
-    fetch(`/api/prices?country=${firstCountry}`)
-      .then((r) => r.json())
-      .then((p) => {
-        if (!cancel) setPrices(p);
+    const missing = tripCountries.filter((cc) => !pricesByCountry[cc]);
+    if (missing.length === 0) return;
+    Promise.all(
+      missing.map((cc) => fetch(`/api/prices?country=${cc}`).then((r) => r.json()).then((p: PriceInfo) => [cc, p] as const)),
+    )
+      .then((entries) => {
+        if (cancel) return;
+        setPricesByCountry((prev) => {
+          const next = { ...prev };
+          for (const [cc, p] of entries) next[cc] = p;
+          return next;
+        });
       })
       .catch(() => {});
-    return () => {
-      cancel = true;
-    };
-  }, [firstCountry]);
+    return () => { cancel = true; };
+  }, [tripCountries.join(","), pricesByCountry]);
+
+  const overrideMap = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const [cc, raw] of Object.entries(priceOverrides)) {
+      const n = parseFloat(raw);
+      if (!Number.isNaN(n) && n > 0) m[cc] = n;
+    }
+    return m;
+  }, [priceOverrides]);
 
   const cost: CostBreakdown | null = useMemo(() => {
-    if (!route || !prices || !activeVehicle || effectiveConsumption <= 0) return null;
-    const overrideNum = parseFloat(priceOverride);
-    const unitPrice = !Number.isNaN(overrideNum) && overrideNum > 0 ? overrideNum : undefined;
-    return computeCost(route, { fuelType, consumption: effectiveConsumption }, prices, unitPrice);
-  }, [route, prices, activeVehicle, effectiveConsumption, fuelType, priceOverride]);
-
-  const defaultUnitPrice = prices ? unitPriceFor(prices, fuelType) : 0;
+    if (!route || !activeVehicle || effectiveConsumption <= 0) return null;
+    if (tripCountries.length === 0) return null;
+    if (tripCountries.some((cc) => !pricesByCountry[cc])) return null;
+    return computeCost(
+      route,
+      { fuelType, consumption: effectiveConsumption },
+      placedStops,
+      pricesByCountry,
+      overrideMap,
+    );
+  }, [route, activeVehicle, effectiveConsumption, fuelType, pricesByCountry, overrideMap, tripCountries, placedStops]);
 
   function addStop() {
     setStops((s) => [...s.slice(0, -1), makeStop(), s[s.length - 1]]);
@@ -210,7 +233,7 @@ export default function Page() {
                   <input
                     type="text"
                     className="w-full rounded-lg px-3 py-2.5 text-sm"
-                    placeholder="Vehicle name (e.g. Ninja 300, Toyota Mocha)"
+                    placeholder="Vehicle name (e.g. Ninja 300, Camper Van)"
                     value={customName}
                     onChange={(e) => setCustomName(e.target.value)}
                   />
@@ -295,24 +318,49 @@ export default function Page() {
             </div>
           </Card>
 
-          {prices && vehicle && (
-            <Card title="Price" subtitle={`Country average for ${prices.countryCode} (${prices.asOf})`}>
-              <div className="flex items-center gap-2 text-sm">
-                <label className="text-[var(--fg-muted)]">
-                  {fuelType === "electric" ? "Electricity" : fuelType === "diesel" ? "Diesel" : "Petrol"}
-                </label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.01"
-                  className="no-spin w-24 rounded-md px-2 py-1 text-sm"
-                  placeholder={formatNumber(defaultUnitPrice, 3)}
-                  value={priceOverride}
-                  onChange={(e) => setPriceOverride(e.target.value)}
-                />
-                <span className="text-[var(--fg-muted)] text-xs">
-                  {prices.currency}/{fuelType === "electric" ? "kWh" : "L"}
-                </span>
+          {activeVehicle && tripCountries.length > 0 && (
+            <Card
+              title="Prices"
+              subtitle={
+                tripCountries.length === 1
+                  ? `Country average for ${tripCountries[0]} — editable`
+                  : `Cross-country trip — one price per country, all editable`
+              }
+            >
+              <div className="space-y-2">
+                {tripCountries.map((cc) => {
+                  const p = pricesByCountry[cc];
+                  if (!p) {
+                    return (
+                      <div key={cc} className="text-xs text-[var(--fg-muted)]">Loading {cc}…</div>
+                    );
+                  }
+                  const base = unitPriceFor(p, fuelType);
+                  const unit = fuelType === "electric" ? "kWh" : "L";
+                  const label = fuelType === "electric" ? "Electricity" : fuelType === "diesel" ? "Diesel" : "Petrol";
+                  return (
+                    <div key={cc} className="flex items-center justify-between gap-2 text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] uppercase tracking-widest text-[var(--fg-muted)] w-8">{cc}</span>
+                        <span className="text-[var(--fg-muted)] text-xs">{label}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          className="no-spin w-24 rounded-md px-2 py-1 text-sm text-right"
+                          placeholder={formatNumber(base, 3)}
+                          value={priceOverrides[cc] ?? ""}
+                          onChange={(e) =>
+                            setPriceOverrides((prev) => ({ ...prev, [cc]: e.target.value }))
+                          }
+                        />
+                        <span className="text-[var(--fg-muted)] text-xs w-14">{p.currency}/{unit}</span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </Card>
           )}
@@ -340,7 +388,7 @@ export default function Page() {
           {cost ? (
             <ResultCard cost={cost} />
           ) : (
-            <div className="glass rounded-xl p-5 text-sm text-[var(--fg-muted)]">
+            <div className="surface rounded-xl p-5 text-sm text-[var(--fg-muted)]">
               Pick a vehicle, your route, and hit calculate. We&apos;ll estimate using country-average fuel prices — you can override anything.
             </div>
           )}
@@ -359,7 +407,7 @@ export default function Page() {
 
 function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <div className="glass rounded-xl p-4">
+    <div className="surface rounded-xl p-4">
       <div className="mb-3">
         <div className="text-sm font-medium">{title}</div>
         {subtitle && <div className="text-xs text-[var(--fg-muted)] mt-0.5">{subtitle}</div>}
