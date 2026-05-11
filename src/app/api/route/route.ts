@@ -6,6 +6,29 @@ type Body = {
   stops: Array<{ lng: number; lat: number }>;
 };
 
+const SAMPLE_TARGET = 16;
+
+function sampleEvenly<T>(arr: T[], n: number): T[] {
+  if (arr.length <= n) return arr;
+  const step = (arr.length - 1) / (n - 1);
+  const out: T[] = [];
+  for (let i = 0; i < n; i++) out.push(arr[Math.round(i * step)]);
+  return out;
+}
+
+async function reverseCountry(lng: number, lat: number, token: string): Promise<string | null> {
+  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${token}&types=country&limit=1`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const cc = data.features?.[0]?.properties?.short_code as string | undefined;
+    return cc ? cc.toUpperCase() : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(req: Request) {
   const token = process.env.MAPBOX_TOKEN;
   if (!token) {
@@ -44,10 +67,35 @@ export async function POST(req: Request) {
     durationMin: l.duration / 60,
   }));
 
+  const geometry: GeoJSON.LineString = route.geometry;
+  const totalDistanceKm = route.distance / 1000;
+
+  const samples = sampleEvenly(geometry.coordinates as Array<[number, number]>, SAMPLE_TARGET);
+  const sampleCountries = await Promise.all(
+    samples.map(([lng, lat]) => reverseCountry(lng, lat, token)),
+  );
+
+  const counts = new Map<string, number>();
+  for (const cc of sampleCountries) {
+    if (!cc) continue;
+    counts.set(cc, (counts.get(cc) ?? 0) + 1);
+  }
+  const totalCounted = Array.from(counts.values()).reduce((a, b) => a + b, 0);
+  const countryShares =
+    totalCounted > 0
+      ? Array.from(counts.entries())
+          .map(([countryCode, n]) => ({
+            countryCode,
+            distanceKm: (n / totalCounted) * totalDistanceKm,
+          }))
+          .sort((a, b) => b.distanceKm - a.distanceKm)
+      : [];
+
   return NextResponse.json({
     legs,
-    totalDistanceKm: route.distance / 1000,
+    totalDistanceKm,
     totalDurationMin: route.duration / 60,
-    geometry: route.geometry,
+    geometry,
+    countryShares,
   });
 }

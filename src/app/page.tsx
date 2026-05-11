@@ -5,7 +5,7 @@ import AddressInput from "@/components/AddressInput";
 import VehiclePicker from "@/components/VehiclePicker";
 import RouteMap from "@/components/RouteMap";
 import ResultCard from "@/components/ResultCard";
-import type { CostBreakdown, FuelType, PriceInfo, RouteResult, Stop, Vehicle } from "@/lib/types";
+import type { CostBreakdown, PriceInfo, RouteResult, Stop, Vehicle } from "@/lib/types";
 import { computeCost, fuelEmoji, formatNumber } from "@/lib/calc";
 import { unitPriceFor } from "@/lib/prices";
 
@@ -18,25 +18,6 @@ function makeStop(): Stop {
 export default function Page() {
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [consumptionOverride, setConsumptionOverride] = useState<string>("");
-  const [customMode, setCustomMode] = useState(false);
-  const [customName, setCustomName] = useState("");
-  const [customFuel, setCustomFuel] = useState<FuelType>("petrol");
-  const [customConsumption, setCustomConsumption] = useState("");
-
-  const customVehicle: Vehicle | null = useMemo(() => {
-    const c = parseFloat(customConsumption);
-    if (!customMode || Number.isNaN(c) || c <= 0) return null;
-    return {
-      id: "custom",
-      make: "Custom",
-      model: customName.trim() || "Vehicle",
-      yearStart: 0,
-      fuelType: customFuel,
-      consumption: c,
-    };
-  }, [customMode, customName, customFuel, customConsumption]);
-
-  const activeVehicle = customMode ? customVehicle : vehicle;
   const [stops, setStops] = useState<Stop[]>([makeStop(), makeStop()]);
   const [route, setRoute] = useState<RouteResult | null>(null);
   const [pricesByCountry, setPricesByCountry] = useState<Record<string, PriceInfo>>({});
@@ -45,16 +26,15 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
 
   const effectiveConsumption = useMemo(() => {
-    if (customMode) return activeVehicle?.consumption ?? 0;
     const override = parseFloat(consumptionOverride);
     if (!Number.isNaN(override) && override > 0) return override;
-    return activeVehicle?.consumption ?? 0;
-  }, [customMode, consumptionOverride, activeVehicle?.consumption]);
+    return vehicle?.consumption ?? 0;
+  }, [consumptionOverride, vehicle?.consumption]);
 
-  const fuelType = activeVehicle?.fuelType ?? "petrol";
+  const fuelType = vehicle?.fuelType ?? "petrol";
   const placedStops = stops.filter((s) => s.lng !== 0 || s.lat !== 0);
 
-  const tripCountries = useMemo(() => {
+  const stopCountries = useMemo(() => {
     const out: string[] = [];
     for (const s of placedStops) {
       if (s.countryCode && !out.includes(s.countryCode)) out.push(s.countryCode);
@@ -62,13 +42,25 @@ export default function Page() {
     return out;
   }, [placedStops.map((s) => s.countryCode).join(",")]);
 
+  const transitCountries = useMemo(() => {
+    if (!route?.countryShares?.length) return [];
+    return route.countryShares.map((c) => c.countryCode);
+  }, [route]);
+
+  const allCountries = useMemo(() => {
+    const set = new Set<string>([...stopCountries, ...transitCountries]);
+    return Array.from(set);
+  }, [stopCountries, transitCountries]);
+
   useEffect(() => {
-    if (tripCountries.length === 0) return;
-    let cancel = false;
-    const missing = tripCountries.filter((cc) => !pricesByCountry[cc]);
+    if (allCountries.length === 0) return;
+    const missing = allCountries.filter((cc) => !pricesByCountry[cc]);
     if (missing.length === 0) return;
+    let cancel = false;
     Promise.all(
-      missing.map((cc) => fetch(`/api/prices?country=${cc}`).then((r) => r.json()).then((p: PriceInfo) => [cc, p] as const)),
+      missing.map((cc) =>
+        fetch(`/api/prices?country=${cc}`).then((r) => r.json()).then((p: PriceInfo) => [cc, p] as const),
+      ),
     )
       .then((entries) => {
         if (cancel) return;
@@ -80,7 +72,7 @@ export default function Page() {
       })
       .catch(() => {});
     return () => { cancel = true; };
-  }, [tripCountries.join(","), pricesByCountry]);
+  }, [allCountries.join(","), pricesByCountry]);
 
   const overrideMap = useMemo(() => {
     const m: Record<string, number> = {};
@@ -92,17 +84,19 @@ export default function Page() {
   }, [priceOverrides]);
 
   const cost: CostBreakdown | null = useMemo(() => {
-    if (!route || !activeVehicle || effectiveConsumption <= 0) return null;
-    if (tripCountries.length === 0) return null;
-    if (tripCountries.some((cc) => !pricesByCountry[cc])) return null;
+    if (!route || !vehicle || effectiveConsumption <= 0) return null;
+    if (allCountries.length === 0) return null;
+    if (allCountries.some((cc) => !pricesByCountry[cc])) return null;
     return computeCost(
       route,
       { fuelType, consumption: effectiveConsumption },
-      placedStops,
       pricesByCountry,
       overrideMap,
+      stopCountries[0],
     );
-  }, [route, activeVehicle, effectiveConsumption, fuelType, pricesByCountry, overrideMap, tripCountries, placedStops]);
+  }, [route, vehicle, effectiveConsumption, fuelType, pricesByCountry, overrideMap, allCountries, stopCountries]);
+
+  const priceCardCountries = transitCountries.length > 0 ? transitCountries : stopCountries;
 
   function addStop() {
     setStops((s) => [...s.slice(0, -1), makeStop(), s[s.length - 1]]);
@@ -112,13 +106,12 @@ export default function Page() {
   }
   function updateStop(id: string, value: Stop | null) {
     setStops((s) => s.map((x) => (x.id === id ? { ...(value ?? makeStop()), id } : x)));
+    setRoute(null);
   }
   function swap() {
     if (stops.length !== 2) return;
-    setStops(([a, b]) => [
-      { ...b, id: a.id },
-      { ...a, id: b.id },
-    ]);
+    setStops(([a, b]) => [{ ...b, id: a.id }, { ...a, id: b.id }]);
+    setRoute(null);
   }
 
   async function calculate() {
@@ -128,10 +121,8 @@ export default function Page() {
       setError("Pick at least an origin and destination.");
       return;
     }
-    if (!activeVehicle) {
-      setError(customMode
-        ? "Set fuel type and consumption for your custom vehicle."
-        : "Pick a vehicle from the list, or switch to Custom.");
+    if (!vehicle) {
+      setError("Pick a vehicle from the list.");
       return;
     }
     if (effectiveConsumption <= 0) {
@@ -158,16 +149,14 @@ export default function Page() {
     }
   }
 
-  const proximity = placedStops[0]
-    ? { lng: placedStops[0].lng, lat: placedStops[0].lat }
-    : undefined;
+  const proximity = placedStops[0] ? { lng: placedStops[0].lng, lat: placedStops[0].lat } : undefined;
 
   return (
     <div className="min-h-full flex flex-col">
-      <header className="border-b border-[var(--border)]">
+      <header className="border-b divider">
         <div className="max-w-6xl mx-auto px-5 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--accent)] to-[var(--accent-2)] flex items-center justify-center text-white font-bold text-sm">A→B</div>
+            <div className="w-9 h-9 rounded-lg bg-[var(--accent)] text-[#fff8f3] flex items-center justify-center font-bold text-sm shadow-sm">A→B</div>
             <div>
               <div className="font-semibold tracking-tight">A2B Fuel</div>
               <div className="text-[10px] uppercase tracking-widest text-[var(--fg-muted)]">drive cost estimator</div>
@@ -183,98 +172,37 @@ export default function Page() {
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-5 py-8 grid lg:grid-cols-5 gap-6">
         <section className="lg:col-span-2 space-y-5">
-          <Card title="Vehicle" subtitle="What's drinking the fuel?">
+          <Card title="Vehicle" subtitle="Pick one from the list — edit the consumption if you know your real-world figure.">
             <div className="space-y-3">
-              <div className="flex gap-1 rounded-lg bg-[var(--surface-2)] p-1 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setCustomMode(false)}
-                  className={`flex-1 px-3 py-1.5 rounded-md transition-colors ${!customMode ? "bg-[var(--surface)] text-[var(--fg)]" : "text-[var(--fg-muted)]"}`}
-                >From list</button>
-                <button
-                  type="button"
-                  onClick={() => setCustomMode(true)}
-                  className={`flex-1 px-3 py-1.5 rounded-md transition-colors ${customMode ? "bg-[var(--surface)] text-[var(--fg)]" : "text-[var(--fg-muted)]"}`}
-                >Custom (anything)</button>
-              </div>
-
-              {!customMode && (
-                <>
-                  <VehiclePicker vehicle={vehicle} onChange={(v) => { setVehicle(v); setConsumptionOverride(""); }} />
-                  {vehicle && (
-                    <div className="flex flex-wrap items-center gap-2 text-sm">
-                      <span className="text-[var(--fg-muted)]">{fuelEmoji(vehicle.fuelType)} {vehicle.fuelType}</span>
-                      <span className="text-[var(--fg-muted)]">•</span>
-                      <label className="text-[var(--fg-muted)]">Consumption</label>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        step="0.1"
-                        className="no-spin w-20 rounded-md px-2 py-1 text-sm"
-                        placeholder={String(vehicle.consumption)}
-                        value={consumptionOverride}
-                        onChange={(e) => setConsumptionOverride(e.target.value)}
-                      />
-                      <span className="text-[var(--fg-muted)] text-xs">
-                        {vehicle.fuelType === "electric" ? "kWh/100km" : "L/100km"}
-                      </span>
-                    </div>
-                  )}
-                  {!vehicle && (
-                    <p className="text-xs text-[var(--fg-muted)]">
-                      Can&apos;t find it? Switch to <button type="button" onClick={() => setCustomMode(true)} className="underline hover:text-[var(--fg)]">Custom</button> — works for motorcycles, RVs, anything.
-                    </p>
-                  )}
-                </>
-              )}
-
-              {customMode && (
-                <div className="space-y-2.5">
+              <VehiclePicker vehicle={vehicle} onChange={(v) => { setVehicle(v); setConsumptionOverride(""); }} />
+              {vehicle && (
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="text-[var(--fg-muted)]">{fuelEmoji(vehicle.fuelType)} {vehicle.fuelType}</span>
+                  <span className="text-[var(--fg-muted)]">•</span>
+                  <label className="text-[var(--fg-muted)]">Consumption</label>
                   <input
-                    type="text"
-                    className="w-full rounded-lg px-3 py-2.5 text-sm"
-                    placeholder="Vehicle name (e.g. Ninja 300, Camper Van)"
-                    value={customName}
-                    onChange={(e) => setCustomName(e.target.value)}
+                    type="number"
+                    inputMode="decimal"
+                    step="0.1"
+                    className="no-spin w-20 rounded-md px-2 py-1 text-sm"
+                    placeholder={String(vehicle.consumption)}
+                    value={consumptionOverride}
+                    onChange={(e) => setConsumptionOverride(e.target.value)}
                   />
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[10px] uppercase tracking-widest text-[var(--fg-muted)] mb-1">Fuel type</label>
-                      <select
-                        className="w-full rounded-lg px-3 py-2.5 text-sm"
-                        value={customFuel}
-                        onChange={(e) => setCustomFuel(e.target.value as FuelType)}
-                      >
-                        <option value="petrol">Petrol</option>
-                        <option value="diesel">Diesel</option>
-                        <option value="hybrid">Hybrid</option>
-                        <option value="electric">Electric</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] uppercase tracking-widest text-[var(--fg-muted)] mb-1">
-                        Consumption ({customFuel === "electric" ? "kWh" : "L"}/100km)
-                      </label>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        step="0.1"
-                        className="no-spin w-full rounded-lg px-3 py-2.5 text-sm"
-                        placeholder={customFuel === "electric" ? "17.5" : customFuel === "diesel" ? "5.0" : "6.0"}
-                        value={customConsumption}
-                        onChange={(e) => setCustomConsumption(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <p className="text-xs text-[var(--fg-muted)]">
-                    {fuelEmoji(customFuel)} Typical: motorbike 3–6 L/100km · small car 5–7 · SUV 8–11 · EV 15–22 kWh/100km
-                  </p>
+                  <span className="text-[var(--fg-muted)] text-xs">
+                    {vehicle.fuelType === "electric" ? "kWh/100km" : "L/100km"}
+                  </span>
                 </div>
+              )}
+              {!vehicle && (
+                <p className="text-xs text-[var(--fg-muted)]">
+                  Can&apos;t find yours? Pick a similar model — you can adjust the consumption number after.
+                </p>
               )}
             </div>
           </Card>
 
-          <Card title="Route" subtitle="Where are you driving?">
+          <Card title="Route" subtitle="Origin, destination, plus any stops in between.">
             <div className="space-y-2">
               {stops.map((s, i) => {
                 const isFirst = i === 0;
@@ -306,29 +234,31 @@ export default function Page() {
                 <button
                   type="button"
                   onClick={addStop}
-                  className="text-xs px-2.5 py-1.5 rounded-md border border-[var(--border)] hover:bg-[var(--surface-2)]"
+                  className="text-xs px-2.5 py-1.5 rounded-md border divider hover:bg-[var(--surface-2)]"
                 >+ Add stop</button>
                 <button
                   type="button"
                   onClick={swap}
-                  className="text-xs px-2.5 py-1.5 rounded-md border border-[var(--border)] hover:bg-[var(--surface-2)] disabled:opacity-40"
+                  className="text-xs px-2.5 py-1.5 rounded-md border divider hover:bg-[var(--surface-2)] disabled:opacity-40"
                   disabled={stops.length !== 2}
                 >↕ Swap</button>
               </div>
             </div>
           </Card>
 
-          {activeVehicle && tripCountries.length > 0 && (
+          {vehicle && priceCardCountries.length > 0 && (
             <Card
               title="Prices"
               subtitle={
-                tripCountries.length === 1
-                  ? `Country average for ${tripCountries[0]} — editable`
-                  : `Cross-country trip — one price per country, all editable`
+                priceCardCountries.length === 1
+                  ? `Country average for ${priceCardCountries[0]} — editable`
+                  : transitCountries.length > 0
+                    ? `Crossing ${priceCardCountries.length} countries — one price per country, all editable`
+                    : `${priceCardCountries.length} countries — full list after you calculate`
               }
             >
               <div className="space-y-2">
-                {tripCountries.map((cc) => {
+                {priceCardCountries.map((cc) => {
                   const p = pricesByCountry[cc];
                   if (!p) {
                     return (
@@ -369,13 +299,13 @@ export default function Page() {
             type="button"
             onClick={calculate}
             disabled={calculating}
-            className="btn-primary w-full rounded-lg py-3 font-medium text-sm tracking-wide shadow-lg hover:shadow-xl transition-shadow"
+            className="btn-primary w-full rounded-lg py-3 font-medium text-sm tracking-wide shadow-md hover:shadow-lg transition-shadow"
           >
             {calculating ? "Calculating…" : "Calculate drive cost"}
           </button>
 
           {error && (
-            <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+            <div className="text-sm text-[#9a3b30] bg-[#fbe6e2] border border-[#e9bdb5] rounded-lg px-3 py-2">
               {error}
             </div>
           )}
@@ -395,7 +325,7 @@ export default function Page() {
         </section>
       </main>
 
-      <footer className="border-t border-[var(--border)] mt-auto">
+      <footer className="border-t divider mt-auto">
         <div className="max-w-6xl mx-auto px-5 py-4 text-xs text-[var(--fg-muted)] flex items-center justify-between">
           <span>Estimates only. Tolls not included.</span>
           <span>Routing by Mapbox</span>

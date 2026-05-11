@@ -5,6 +5,7 @@ import { formatCurrency, formatDistance, formatDuration, formatNumber } from "@/
 
 export default function ResultCard({ cost }: { cost: CostBreakdown }) {
   const multiCurrency = cost.byCurrency.length > 1;
+  const multiCountry = cost.byCountry.length > 1;
   return (
     <div className="surface rounded-xl p-5 space-y-4">
       <div>
@@ -32,20 +33,24 @@ export default function ResultCard({ cost }: { cost: CostBreakdown }) {
         />
       </div>
 
-      {multiCurrency && (
-        <div className="rounded-lg border border-[var(--border)] divide-y divide-[var(--border)]">
-          {cost.byCurrency.map((c) => (
-            <div key={c.currency} className="flex items-center justify-between px-3 py-2 text-sm">
+      {multiCountry && (
+        <div className="rounded-lg border divider divide-y divider">
+          {cost.byCountry.map((c) => (
+            <div key={c.countryCode} className="flex items-center justify-between px-3 py-2 text-sm">
               <span className="text-[var(--fg-muted)]">
-                {c.countries.join(" + ")} <span className="text-[10px] uppercase tracking-widest">{c.currency}</span>
+                <span className="text-[var(--fg)] font-medium mr-2">{c.countryCode}</span>
+                {formatDistance(c.distanceKm)}
               </span>
-              <span>{formatCurrency(c.total, c.currency)} <span className="text-[var(--fg-muted)] text-xs">· {formatDistance(c.distanceKm)}</span></span>
+              <span>
+                {formatCurrency(c.cost, c.currency)}
+                <span className="text-[var(--fg-muted)] text-xs ml-2">@ {formatNumber(c.unitPrice, 3)} {c.currency}/{cost.unitsLabel}</span>
+              </span>
             </div>
           ))}
         </div>
       )}
 
-      <div className="pt-2 border-t border-[var(--border)] text-xs text-[var(--fg-muted)] leading-relaxed">
+      <div className="pt-2 border-t divider text-xs text-[var(--fg-muted)] leading-relaxed">
         Using <span className="text-[var(--fg)]">{formatNumber(cost.consumption, 1)} {cost.consumptionUnit}</span>{" "}
         and country-average prices as of {cost.priceAsOf}. Prices and consumption are editable.
       </div>

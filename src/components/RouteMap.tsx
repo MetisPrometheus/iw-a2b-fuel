@@ -1,5 +1,6 @@
 "use client";
 
+import { encodePolyline, downsampleCoords } from "@/lib/polyline";
 import type { Stop } from "@/lib/types";
 
 type Props = {
@@ -8,40 +9,46 @@ type Props = {
   mapboxToken?: string;
 };
 
-function encodeGeometry(geom: GeoJSON.LineString): string {
-  const path = `path-4+7c5cff-0.85(${encodeURIComponent(JSON.stringify(geom))})`;
-  return path;
-}
+const PATH_COLOR = "c97064";
+const ORIGIN_PIN = "pin-l-a+6b8e7a";
+const DEST_PIN = "pin-l-b+c97064";
+const MID_PIN_PREFIX = "pin-s";
 
 export default function RouteMap({ stops, geometry, mapboxToken }: Props) {
   if (!mapboxToken) {
     return (
       <div className="surface rounded-xl h-full min-h-72 flex items-center justify-center text-center p-6">
         <p className="text-sm text-[var(--fg-muted)]">
-          Add <code className="text-[var(--fg)] bg-[var(--surface-2)] px-1.5 py-0.5 rounded">NEXT_PUBLIC_MAPBOX_TOKEN</code> to show map previews.
+          Add <code className="bg-[var(--surface-2)] px-1.5 py-0.5 rounded">NEXT_PUBLIC_MAPBOX_TOKEN</code> to show map previews.
         </p>
       </div>
     );
   }
 
-  const placed = stops.filter((s) => s.lng && s.lat);
+  const placed = stops.filter((s) => s.lng !== 0 || s.lat !== 0);
   if (placed.length === 0 && !geometry) {
     return (
       <div className="surface rounded-xl h-full min-h-72 flex items-center justify-center text-center p-6">
-        <p className="text-sm text-[var(--fg-muted)]">Map preview will appear once you pick a route.</p>
+        <p className="text-sm text-[var(--fg-muted)]">Map preview appears once you pick a route.</p>
       </div>
     );
   }
 
   const overlays: string[] = [];
-  if (geometry) overlays.push(encodeGeometry(geometry));
+  if (geometry) {
+    const coords = downsampleCoords(geometry.coordinates as Array<[number, number]>, 180);
+    const encoded = encodePolyline(coords);
+    overlays.push(`path-5+${PATH_COLOR}-0.9(${encodeURIComponent(encoded)})`);
+  }
   placed.forEach((s, i) => {
-    const marker = i === 0 ? "pin-l-a+22d3ee" : i === placed.length - 1 ? "pin-l-b+7c5cff" : `pin-s-${i + 1}+8a8a93`;
-    overlays.push(`${marker}(${s.lng},${s.lat})`);
+    let marker: string;
+    if (i === 0) marker = `${ORIGIN_PIN}(${s.lng},${s.lat})`;
+    else if (i === placed.length - 1) marker = `${DEST_PIN}(${s.lng},${s.lat})`;
+    else marker = `${MID_PIN_PREFIX}-${i + 1}+7a6f5e(${s.lng},${s.lat})`;
+    overlays.push(marker);
   });
 
-  const auto = "auto";
-  const url = `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${overlays.join(",")}/${auto}/900x520@2x?access_token=${mapboxToken}&padding=60`;
+  const url = `https://api.mapbox.com/styles/v1/mapbox/light-v11/static/${overlays.join(",")}/auto/900x520@2x?access_token=${mapboxToken}&padding=60`;
 
   return (
     <div className="surface rounded-xl overflow-hidden h-full min-h-72">

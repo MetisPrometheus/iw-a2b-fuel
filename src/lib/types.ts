@@ -23,12 +23,17 @@ export type RouteLeg = {
   durationMin: number;
 };
 
+export type CountryShare = {
+  countryCode: string;
+  distanceKm: number;
+};
+
 export type RouteResult = {
   legs: RouteLeg[];
   totalDistanceKm: number;
   totalDurationMin: number;
   geometry: GeoJSON.LineString;
-  originCountry?: string;
+  countryShares: CountryShare[];
 };
 
 export type PriceInfo = {
@@ -41,12 +46,10 @@ export type PriceInfo = {
   source: string;
 };
 
-export type LegCost = {
-  legIndex: number;
+export type CountryCost = {
   countryCode: string;
   currency: string;
   distanceKm: number;
-  durationMin: number;
   unitsUsed: number;
   unitPrice: number;
   cost: number;
@@ -66,7 +69,7 @@ export type CostBreakdown = {
   consumptionUnit: "L/100km" | "kWh/100km";
   totalUnitsUsed: number;
   unitsLabel: "L" | "kWh";
-  legs: LegCost[];
+  byCountry: CountryCost[];
   byCurrency: CurrencyTotal[];
   priceAsOf: string;
 };

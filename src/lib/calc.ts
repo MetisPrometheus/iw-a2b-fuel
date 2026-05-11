@@ -1,29 +1,36 @@
-import type { CostBreakdown, CurrencyTotal, FuelType, LegCost, PriceInfo, RouteResult, Stop } from "./types";
+import type {
+  CostBreakdown,
+  CountryCost,
+  CountryShare,
+  CurrencyTotal,
+  FuelType,
+  PriceInfo,
+  RouteResult,
+} from "./types";
 import { unitPriceFor, unitsLabel } from "./prices";
 
 export function computeCost(
   route: RouteResult,
   vehicle: { fuelType: FuelType; consumption: number },
-  stops: Stop[],
   pricesByCountry: Record<string, PriceInfo>,
   unitPriceOverrideByCountry: Record<string, number> = {},
+  fallbackCountryCode?: string,
 ): CostBreakdown {
-  const legs: LegCost[] = route.legs.map((leg, i) => {
-    const startStop = stops[i];
-    const cc = startStop?.countryCode ?? "??";
-    const prices = pricesByCountry[cc];
-    const fallbackPrice = Object.values(pricesByCountry)[0];
-    const effectivePrices = prices ?? fallbackPrice;
-    const override = unitPriceOverrideByCountry[cc];
-    const baseUnitPrice = effectivePrices ? unitPriceFor(effectivePrices, vehicle.fuelType) : 0;
+  const shares: CountryShare[] =
+    route.countryShares && route.countryShares.length > 0
+      ? route.countryShares
+      : [{ countryCode: fallbackCountryCode ?? "??", distanceKm: route.totalDistanceKm }];
+
+  const byCountry: CountryCost[] = shares.map((share) => {
+    const prices = pricesByCountry[share.countryCode] ?? Object.values(pricesByCountry)[0];
+    const override = unitPriceOverrideByCountry[share.countryCode];
+    const baseUnitPrice = prices ? unitPriceFor(prices, vehicle.fuelType) : 0;
     const unitPrice = override && override > 0 ? override : baseUnitPrice;
-    const unitsUsed = (leg.distanceKm * vehicle.consumption) / 100;
+    const unitsUsed = (share.distanceKm * vehicle.consumption) / 100;
     return {
-      legIndex: i,
-      countryCode: cc,
-      currency: effectivePrices?.currency ?? "USD",
-      distanceKm: leg.distanceKm,
-      durationMin: leg.durationMin,
+      countryCode: share.countryCode,
+      currency: prices?.currency ?? "USD",
+      distanceKm: share.distanceKm,
       unitsUsed,
       unitPrice,
       cost: unitsUsed * unitPrice,
@@ -31,20 +38,19 @@ export function computeCost(
   });
 
   const byCurrencyMap = new Map<string, CurrencyTotal>();
-  for (const leg of legs) {
-    const entry = byCurrencyMap.get(leg.currency) ?? {
-      currency: leg.currency,
+  for (const c of byCountry) {
+    const entry = byCurrencyMap.get(c.currency) ?? {
+      currency: c.currency,
       total: 0,
       distanceKm: 0,
       countries: [],
     };
-    entry.total += leg.cost;
-    entry.distanceKm += leg.distanceKm;
-    if (!entry.countries.includes(leg.countryCode)) entry.countries.push(leg.countryCode);
-    byCurrencyMap.set(leg.currency, entry);
+    entry.total += c.cost;
+    entry.distanceKm += c.distanceKm;
+    if (!entry.countries.includes(c.countryCode)) entry.countries.push(c.countryCode);
+    byCurrencyMap.set(c.currency, entry);
   }
 
-  const totalUnitsUsed = legs.reduce((s, l) => s + l.unitsUsed, 0);
   const priceAsOf = Object.values(pricesByCountry)[0]?.asOf ?? "";
 
   return {
@@ -52,9 +58,9 @@ export function computeCost(
     totalDurationMin: route.totalDurationMin,
     consumption: vehicle.consumption,
     consumptionUnit: vehicle.fuelType === "electric" ? "kWh/100km" : "L/100km",
-    totalUnitsUsed,
+    totalUnitsUsed: byCountry.reduce((s, c) => s + c.unitsUsed, 0),
     unitsLabel: unitsLabel(vehicle.fuelType),
-    legs,
+    byCountry,
     byCurrency: Array.from(byCurrencyMap.values()),
     priceAsOf,
   };
